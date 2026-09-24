@@ -1,1 +1,53 @@
+# ===== 通用（全局生效，含 pi-mono / frontend）=====
 .pi-agent/
+
+# 依赖与构建产物
+node_modules/
+dist/
+*.tsbuildinfo
+*.cpuprofile
+
+# 日志与系统文件
+*.log
+.DS_Store
+
+# 环境变量
+.env
+
+# 编辑器
+.vscode/
+.zed/
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+
+# 测试/覆盖率
+.npm/
+coverage/
+.nyc_output/
+
+# ===== pi-mono 特有（已加 pi-mono/ 前缀）=====
+pi-mono/.artifacts/
+pi-mono/.pi_config/
+pi-mono/.opencode/
+pi-mono/.pi/hf-sessions/
+pi-mono/.pi/hf-sessions-backup/
+pi-mono/compaction-results/
+pi-mono/plans/
+pi-mono/todo.md
+pi-mono/collect.sh
+pi-mono/tui-debug.log
+pi-mono/syntax.jsonl
+pi-mono/out.jsonl
+pi-mono/pi-*.html
+pi-mono/out.html
+
+# pi-mono 各 package 产物
+pi-mono/packages/*/dist-chrome/
+pi-mono/packages/*/dist-firefox/
+pi-mono/packages/ai/src/providers/data/
+pi-mono/packages/ai/src/providers/.model-generation-*/
+pi-mono/packages/coding-agent/binaries/
+pi-mono/packages/agent/docs/extensions/pi-server-artifact/index.md
