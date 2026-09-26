@@ -15,7 +15,9 @@ type IconName =
   | "menu"
   | "close"
   | "arrow"
-  | "shield";
+  | "shield"
+  | "moon"
+  | "sun";
 
 const paths: Record<IconName, React.ReactNode> = {
   grid: <><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></>,
@@ -32,7 +34,9 @@ const paths: Record<IconName, React.ReactNode> = {
   menu: <><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></>,
   close: <><path d="m6 6 12 12"/><path d="m18 6-12 12"/></>,
   arrow: <><path d="M5 12h14"/><path d="m14 7 5 5-5 5"/></>,
-  shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></>
+  shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></>,
+  moon: <path d="M20.5 14.4A8.5 8.5 0 0 1 9.6 3.5 8.5 8.5 0 1 0 20.5 14.4Z"/>,
+  sun: <><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></>
 };
 
 interface IconProps extends SVGProps<SVGSVGElement> {

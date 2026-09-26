@@ -4,7 +4,7 @@ File Router 是统一文件摄取与知识路由系统。它接收尚未分类�
 
 项目希望解决的核心问题是：调用方不应在提交文件前就知道该使用哪套处理逻辑。所有输入都应从同一个入口进入，并在不修改原始证据的前提下，得到可解释、可审核、可重放的处理结果。
 
-> 当前状态：规划与交互原型阶段。路由系统 Spec、项目资料甄别规则和前端原型已经存在；真实的 Intake、Router、Handler、持久化与 API 尚未实现。前端目前使用本地模拟数据，不会读取或上传所选文件的内容。
+> 当前状态：第一阶段后端已经实现 Original Files、Intake Orchestrator、File Registry、SQLite 持久化与真实上传 API；前端已接入登记流程。Inspector、Router、Review、Dispatcher 和类别 Handler 尚未实现。
 
 ## 核心目标
 
@@ -128,7 +128,8 @@ judge_tool/
 ├── README.md                         # 项目总览（本文件）
 ├── 知识管理存储清单.md               # 五类文件的定义与审核边界
 ├── specs/
-│   └── 初始路由系统-spec.md          # File Router 的完整设计规格
+│   ├── 初始路由系统-spec.md          # File Router 的完整设计规格
+│   └── 第一阶段后端-spec.md          # Original Files、Intake 与 Registry
 ├── project_materials/
 │   └── 项目资料甄别规则.md           # 首个 Handler 的业务规则
 ├── frontend/                         # React + TypeScript 交互原型
@@ -150,9 +151,10 @@ judge_tool/
 | File Router 架构规格          | 已完成草案 | Spec 版本`0.1`，状态为 Draft               |
 | 项目资料甄别规则              | 已完成草案 | 覆盖项目背景抽取、数据集识别、画像和审核     |
 | 管理端视觉规范                | 已完成     | Monochrome Signal 设计规范                   |
-| 前端交互原型                  | 已完成     | 总览、摄取、路由审核、Handler 状态和文件详情 |
-| 真实文件读取与上传            | 未实现     | 前端选择文件后仅生成模拟记录                 |
-| Intake / Registry / Inspector | 未实现     | 尚无后端或 CLI 入口                          |
+| 前端登记工作台                | 已完成     | 真实上传、登记总览、列表和文件详情           |
+| Original Files 与真实上传     | 已完成     | 流式落盘、SHA-256、内容寻址与 Blob 去重       |
+| Intake / File Registry        | 已完成     | FastAPI、SQLite、批次、幂等和文件查询         |
+| Inspector                     | 未实现     | 尚未提取文本、标题或表格结构                  |
 | Router 与决策策略             | 未实现     | 尚无规则引擎、LLM 分类和评测集               |
 | Handler 运行时                | 未实现     | 五类 Handler 尚未按统一契约接入              |
 | 审核、存储与审计              | 未实现     | 尚无持久化状态机和正式收录链路               |
@@ -176,40 +178,48 @@ pnpm run typecheck
 pnpm run build
 ```
 
-当前原型的文件选择操作只模拟“登记 → 路由 → 人工复核”，不会读取、分析或上传文件内容。
+文件选择会调用第一阶段后端，真实上传文件并显示 Registry 结果。当前不会执行 Inspector、Router 或 Handler。
+
+## 运行第一阶段后端
+
+```bash
+cd backend
+uv sync
+uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+```
+
+后端默认使用 `runtime/registry/registry.db` 和 `runtime/originals/`。API 文档位于 `http://127.0.0.1:8000/docs`。
 
 ## 规划中的代码结构
 
-后端实现计划以 TypeScript 为主，并按职责拆分：
+后端采用 Python + FastAPI，前端继续使用 React + TypeScript；前后端通过 OpenAPI 契约和生成的 TypeScript Client 对接。当前第一阶段后端只实现 Original Files、Intake Orchestrator 和 File Registry，完整实现再按职责扩展：
 
 ```text
-config/          # 类别、路由政策、Handler 和日志配置
-schemas/         # 模块间唯一的机器可校验契约
-prompts/router/  # 独立版本化的语义路由提示词
-src/intake/      # 统一摄取入口
-src/registry/    # 文件登记、哈希与去重
-src/inspector/   # 元数据检查、内容采样和格式适配器
-src/router/      # 分类器、决策策略和输出校验
-src/orchestrator/# 状态机、派发、重试和 Job 存储
-src/handlers/    # 五类可插拔 Handler
-src/review/      # 路由审核与类别审核
-src/storage/     # 暂存区、正式区与路径控制
-src/observability/# 日志、审计与指标
-tests/           # 单元、契约、集成与路由评测
-runtime/         # 本地运行数据，不纳入源码版本控制
+backend/app/api/             # FastAPI、OpenAPI 与错误响应
+backend/app/application/     # Intake、路由和派发编排
+backend/app/domain/          # 领域模型、状态与端口
+backend/app/infrastructure/  # SQLite、本地文件存储和外部适配器
+backend/app/handlers/        # 五类可插拔 Handler
+backend/tests/               # 单元、契约、集成与路由评测
+config/                      # 类别、路由政策和 Handler 配置
+prompts/                     # 独立版本化的 Agent 提示词
+runtime/                     # 本地运行数据，不纳入源码版本控制
 ```
 
 模块之间以 `FileRecord`、`RoutingDecision`、`HandlerRequest` 和 `HandlerResult` 等 Schema 交互，避免把文件系统细节或某个 Handler 的业务逻辑泄漏到 Router。
+
+第一阶段的详细 API、数据模型、存储约束与完成定义见 [`specs/第一阶段后端-spec.md`](specs/第一阶段后端-spec.md)。
 
 ## 实施路线
 
 ### 阶段 1：建立可运行入口
 
-- 定义并校验核心 Schema；
-- 实现单文件和目录摄取；
-- 建立 File Registry、最小 Inspector、状态机与本地 JobStore。
+- 定义并校验 Intake、FileRecord 和 OriginalBlob Schema；
+- 实现单文件和多文件摄取；
+- 建立不可变 Original File Store、File Registry 和 SQLite 持久化；
+- 接通前端真实上传、登记列表和文件详情。
 
-完成标志：支持文件能够从唯一入口完成登记，并获得可追溯状态。
+完成状态：已完成。支持文件能够从唯一入口完成登记，并获得可追溯状态。
 
 ### 阶段 2：实现初始路由
 
@@ -256,6 +266,7 @@ runtime/         # 本地运行数据，不纳入源码版本控制
 ## 关键文档
 
 - [初始路由系统 Spec](specs/初始路由系统-spec.md)：架构、契约、状态机、存储、测试和完成定义；
+- [第一阶段后端 Spec](specs/第一阶段后端-spec.md)：FastAPI 选型、Original Files、Intake Orchestrator、File Registry 与 API；
 - [知识管理存储清单](知识管理存储清单.md)：五类文件及其生命周期和审核要求；
 - [项目资料甄别规则](project_materials/项目资料甄别规则.md)：首个 Handler 的处理边界；
 - [前端说明](frontend/README.md)：原型功能、运行命令与后端接口建议；

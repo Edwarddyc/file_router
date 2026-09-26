@@ -1,4 +1,4 @@
-import type { HandlerStatus, RoutingFile } from "../types";
+import type { RoutingFile } from "../types";
 
 export const initialFiles: RoutingFile[] = [
   {
@@ -110,63 +110,5 @@ export const initialFiles: RoutingFile[] = [
     ],
     sha256: "790a3f1b…911f",
     source: "批量导入 / 未分类"
-  }
-];
-
-export const handlerStatuses: HandlerStatus[] = [
-  {
-    id: "project-materials.v1",
-    category: "project-materials",
-    label: "项目资料",
-    version: "v1.0.0",
-    status: "healthy",
-    processed: 128,
-    pending: 4,
-    successRate: 98.4,
-    description: "项目背景抽取、数据集匹配与基础画像"
-  },
-  {
-    id: "business-knowledge.v1",
-    category: "business-knowledge",
-    label: "业务知识",
-    version: "v0.3.0",
-    status: "draft",
-    processed: 36,
-    pending: 2,
-    successRate: 92.1,
-    description: "业务概念、对象、流程、方法与规则提炼"
-  },
-  {
-    id: "architecture.v1",
-    category: "architecture",
-    label: "架构",
-    version: "v0.4.1",
-    status: "healthy",
-    processed: 49,
-    pending: 1,
-    successRate: 96.0,
-    description: "系统设计、组件、接口、数据流与决策抽取"
-  },
-  {
-    id: "results.v1",
-    category: "results",
-    label: "结果",
-    version: "v0.2.0",
-    status: "draft",
-    processed: 21,
-    pending: 3,
-    successRate: 90.5,
-    description: "测试、验证、交付和运行事实归档"
-  },
-  {
-    id: "issues.v1",
-    category: "issues",
-    label: "问题",
-    version: "v0.2.0",
-    status: "attention",
-    processed: 42,
-    pending: 6,
-    successRate: 88.7,
-    description: "缺失、冲突、风险、缺陷和待确认事项管理"
   }
 ];

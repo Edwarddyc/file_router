@@ -1,7 +1,8 @@
-import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
 import { Icon } from "./components/Icon";
 import { CategoryBadge, StateBadge } from "./components/StatusBadge";
-import { handlerStatuses, initialFiles } from "./data/mockData";
+import { handlerStatuses } from "./data/systemCatalog";
+import { listRegisteredFiles, uploadFiles, type FileRecordDto } from "./api/client";
 import {
   categoryMeta,
   type FileCategory,
@@ -23,34 +24,91 @@ const viewTitles: Record<ViewId, { title: string; subtitle: string }> = {
   handlers: { title: "类别处理器", subtitle: "五类 Handler 独立运行，共享统一契约与审核入口" }
 };
 
+type FontScale = "compact" | "standard" | "large";
+type ThemeMode = "light" | "dark";
+
+const fontScaleOptions: Array<{ value: FontScale; label: string }> = [
+  { value: "compact", label: "紧凑" },
+  { value: "standard", label: "标准" },
+  { value: "large", label: "大号" }
+];
+
 function formatFileSize(size: number) {
   if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
   return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function toViewFile(file: FileRecordDto): RoutingFile {
+  return {
+    id: file.file_id,
+    batchId: file.batch_id,
+    name: file.display_name,
+    project: file.project_id,
+    size: file.size_bytes == null ? "—" : formatFileSize(file.size_bytes),
+    extension: file.extension?.toUpperCase() || "FILE",
+    submittedAt: new Date(file.registered_at ?? file.created_at).toLocaleString(),
+    secondarySignals: [],
+    confidence: 0,
+    state: file.status,
+    reasons: [],
+    sha256: file.sha256 ?? "—",
+    source: file.is_content_duplicate ? "重复上传" : "用户上传",
+    duplicateOfFileId: file.duplicate_of_file_id ?? undefined,
+    isContentDuplicate: file.is_content_duplicate,
+    failureMessage: file.failure_message ?? undefined
+  };
+}
+
 function App() {
   const [view, setView] = useState<ViewId>("overview");
-  const [files, setFiles] = useState<RoutingFile[]>(initialFiles);
+  const [files, setFiles] = useState<RoutingFile[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [projectId, setProjectId] = useState("default-project");
+  const [fontScale, setFontScale] = useState<FontScale>(() => {
+    const saved = window.localStorage.getItem("context-router-font-scale");
+    return saved === "compact" || saved === "large" ? saved : "standard";
+  });
+  const [theme, setTheme] = useState<ThemeMode>(() =>
+    window.localStorage.getItem("context-router-theme") === "dark" ? "dark" : "light"
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const selected = files.find((file) => file.id === selectedId) ?? null;
   const reviewCount = files.filter((file) => file.state === "review").length;
 
-  const addFiles = (incoming: File[]) => {
+  const refreshFiles = async () => {
+    const result = await listRegisteredFiles();
+    setFiles(result.items.map(toViewFile));
+  };
+
+  useEffect(() => {
+    void refreshFiles().catch(() => setFiles([]));
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.fontScale = fontScale;
+    window.localStorage.setItem("context-router-font-scale", fontScale);
+  }, [fontScale]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    window.localStorage.setItem("context-router-theme", theme);
+  }, [theme]);
+
+  const addFiles = async (incoming: File[]) => {
+    if (!incoming.length) return;
     const created: RoutingFile[] = incoming.map((file, index) => ({
       id: `file_local_${Date.now()}_${index}`,
       name: file.name,
-      project: "待分配项目",
+      project: projectId,
       size: formatFileSize(file.size),
       extension: file.name.split(".").pop()?.toUpperCase() || "FILE",
       submittedAt: "刚刚",
       secondarySignals: [],
       confidence: 0,
-      disposition: "needs-review",
-      state: "routing",
-      reasons: [{ source: "policy", code: "new-ingest", evidence: "文件已登记，正在提取路由特征。" }],
+      state: "uploading",
+      reasons: [],
       sha256: "计算中…",
       source: "本地上传"
     }));
@@ -58,25 +116,28 @@ function App() {
     setFiles((current) => [...created, ...current]);
     setView("intake");
 
-    window.setTimeout(() => {
+    try {
+      const batch = await uploadFiles(projectId, incoming);
+      const persisted = await listRegisteredFiles();
+      setFiles([
+        ...batch.duplicates.map(toViewFile),
+        ...persisted.items.map(toViewFile)
+      ]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "上传失败";
       setFiles((current) => current.map((file) => created.some((item) => item.id === file.id)
-        ? {
-            ...file,
-            confidence: 0.64,
-            state: "review",
-            reasons: [{ source: "policy", code: "prototype-review", evidence: "前端原型已完成登记；连接路由 API 后将返回实际分类证据。" }]
-          }
+        ? { ...file, state: "failed", failureMessage: message, sha256: "—" }
         : file));
-    }, 1100);
+    }
+  };
+
+  const resetDuplicates = () => {
+    setFiles((current) => current.filter((file) => !file.isContentDuplicate));
   };
 
   const handleFileInput = (event: ChangeEvent<HTMLInputElement>) => {
-    addFiles(Array.from(event.target.files ?? []));
+    void addFiles(Array.from(event.target.files ?? []));
     event.target.value = "";
-  };
-
-  const updateFile = (id: string, update: Partial<RoutingFile>) => {
-    setFiles((current) => current.map((file) => file.id === id ? { ...file, ...update } : file));
   };
 
   const navigate = (id: ViewId) => {
@@ -97,6 +158,10 @@ function App() {
       <main className="main-shell">
         <Header
           view={view}
+          fontScale={fontScale}
+          onFontScale={setFontScale}
+          theme={theme}
+          onTheme={() => setTheme((current) => current === "light" ? "dark" : "light")}
           onMenu={() => setSidebarOpen(true)}
           onUpload={() => fileInputRef.current?.click()}
         />
@@ -108,7 +173,15 @@ function App() {
             <Overview files={files} onOpenFile={setSelectedId} onNavigate={navigate} />
           )}
           {view === "intake" && (
-            <Intake files={files} onFiles={addFiles} onBrowse={() => fileInputRef.current?.click()} onOpenFile={setSelectedId} />
+            <Intake
+              files={files}
+              projectId={projectId}
+              onProjectId={setProjectId}
+              onFiles={(items) => void addFiles(items)}
+              onBrowse={() => fileInputRef.current?.click()}
+              onOpenFile={setSelectedId}
+              onResetDuplicates={() => void resetDuplicates()}
+            />
           )}
           {view === "review" && (
             <ReviewQueue files={files} onOpenFile={setSelectedId} />
@@ -121,7 +194,6 @@ function App() {
         <FileDrawer
           file={selected}
           onClose={() => setSelectedId(null)}
-          onUpdate={(update) => updateFile(selected.id, update)}
         />
       )}
     </div>
@@ -178,7 +250,7 @@ function Sidebar({
   );
 }
 
-function Header({ view, onMenu, onUpload }: { view: ViewId; onMenu: () => void; onUpload: () => void }) {
+function Header({ view, fontScale, onFontScale, theme, onTheme, onMenu, onUpload }: { view: ViewId; fontScale: FontScale; onFontScale: (value: FontScale) => void; theme: ThemeMode; onTheme: () => void; onMenu: () => void; onUpload: () => void }) {
   const meta = viewTitles[view];
   return (
     <header className="topbar">
@@ -186,7 +258,18 @@ function Header({ view, onMenu, onUpload }: { view: ViewId; onMenu: () => void; 
         <button className="icon-button menu-button" onClick={onMenu} aria-label="打开导航"><Icon name="menu" /></button>
         <div><h1>{meta.title}</h1><p>{meta.subtitle}</p></div>
       </div>
-      <button className="primary-button" onClick={onUpload}><Icon name="plus" size={17} />添加文件</button>
+      <div className="topbar-actions">
+        <button className="theme-toggle" onClick={onTheme} aria-label={theme === "light" ? "切换到夜间模式" : "切换到日间模式"} title={theme === "light" ? "夜间模式" : "日间模式"}>
+          <Icon name={theme === "light" ? "moon" : "sun"} size={17} />
+        </button>
+        <label className="font-scale-control">
+          <span aria-hidden="true">Aa</span>
+          <select aria-label="调整界面字号" value={fontScale} onChange={(event) => onFontScale(event.target.value as FontScale)}>
+            {fontScaleOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
+        <button className="primary-button" onClick={onUpload}><Icon name="plus" size={17} />添加文件</button>
+      </div>
     </header>
   );
 }
@@ -200,52 +283,41 @@ function Overview({
   onOpenFile: (id: string) => void;
   onNavigate: (id: ViewId) => void;
 }) {
-  const accepted = files.filter((file) => file.state === "accepted").length;
-  const processing = files.filter((file) => file.state === "processing" || file.state === "routing").length;
-  const reviews = files.filter((file) => file.state === "review").length;
-  const routed = files.filter((file) => file.category);
-  const autoRate = routed.length ? Math.round(routed.filter((file) => file.disposition === "auto-route").length / routed.length * 100) : 0;
-
-  const distribution = (Object.keys(categoryMeta) as FileCategory[]).map((category) => ({
-    category,
-    count: files.filter((file) => file.category === category).length
-  }));
-  const max = Math.max(1, ...distribution.map((item) => item.count));
+  const registered = files.filter((file) => file.state === "registered").length;
+  const uploading = files.filter((file) => file.state === "uploading").length;
+  const failed = files.filter((file) => file.state === "failed").length;
+  const duplicates = files.filter((file) => file.isContentDuplicate).length;
 
   return (
     <div className="page-stack">
       <section className="metric-grid">
-        <MetricCard label="本批次文件" value={files.length.toString()} note="今日新增" tone="blue" icon="file" />
-        <MetricCard label="自动路由率" value={`${autoRate}%`} note="高置信度直接派发" tone="green" icon="spark" />
-        <MetricCard label="处理中" value={processing.toString()} note="跨 5 个处理器" tone="violet" icon="clock" />
-        <MetricCard label="待人工审核" value={reviews.toString()} note="需要你的判断" tone="amber" icon="review" action={() => onNavigate("review")} />
+        <MetricCard label="登记记录" value={files.length.toString()} note="全部摄取记录" tone="blue" icon="file" />
+        <MetricCard label="登记成功" value={registered.toString()} note="原始内容可追溯" tone="green" icon="spark" />
+        <MetricCard label="上传中" value={uploading.toString()} note="正在写入与计算哈希" tone="violet" icon="clock" />
+        <MetricCard label="登记失败" value={failed.toString()} note="查看文件失败原因" tone="amber" icon="review" action={() => onNavigate("intake")} />
       </section>
 
       <section className="dashboard-grid">
         <article className="panel flow-panel">
-          <div className="panel-heading"><div><p className="eyebrow">实时流程</p><h2>摄取管线</h2></div><span className="live-indicator"><i />运行正常</span></div>
-          <div className="pipeline">
-            <PipelineStep label="已登记" value={files.length} icon="upload" tone="blue" complete />
-            <span className="pipeline-line" />
-            <PipelineStep label="已路由" value={routed.length} icon="spark" tone="violet" complete />
-            <span className="pipeline-line" />
-            <PipelineStep label="处理中" value={processing} icon="layers" tone="amber" active />
-            <span className="pipeline-line" />
-            <PipelineStep label="已收录" value={accepted} icon="check" tone="black" />
+          <div className="panel-heading"><div><p className="eyebrow">系统架构</p><h2>模块实施状态</h2></div><span className="live-indicator"><i />第一阶段可用</span></div>
+          <div className="system-stage-grid">
+            <SystemStage label="Intake" status="available" detail={`${files.length} 个提交`} />
+            <SystemStage label="Registry" status="available" detail={`${registered} 个已登记`} />
+            <SystemStage label="Inspector" status="planned" detail="下一阶段" />
+            <SystemStage label="Router" status="planned" detail="尚未接入" />
+            <SystemStage label="Review" status="planned" detail="等待 Router" />
+            <SystemStage label="Dispatcher" status="planned" detail="尚未接入" />
+            <SystemStage label="Handlers" status="planned" detail="逐个实现" />
           </div>
-          <div className="flow-note"><Icon name="shield" /><span>原始文件保持只读，每个决策均保留证据与策略版本。</span></div>
+          <div className="flow-note"><Icon name="shield" /><span>完整模块结构始终保留；每完成一个阶段，只将对应节点切换为真实数据。</span></div>
         </article>
 
         <article className="panel distribution-panel">
-          <div className="panel-heading"><div><p className="eyebrow">文件去向</p><h2>类别分布</h2></div><button className="text-button" onClick={() => onNavigate("handlers")}>查看处理器 <Icon name="arrow" size={15} /></button></div>
+          <div className="panel-heading"><div><p className="eyebrow">存储状态</p><h2>File Registry</h2></div></div>
           <div className="bar-chart">
-            {distribution.map(({ category, count }) => (
-              <div className="bar-row" key={category}>
-                <div className="bar-label"><span className={`category-dot ${category}`} />{categoryMeta[category].label}</div>
-                <div className="bar-track"><span className={category} style={{ width: `${Math.max(count ? 12 : 0, count / max * 100)}%` }} /></div>
-                <strong>{count}</strong>
-              </div>
-            ))}
+            <div className="bar-row"><div className="bar-label">登记成功</div><div className="bar-track"><span className="project-materials" style={{ width: `${files.length ? registered / files.length * 100 : 0}%` }} /></div><strong>{registered}</strong></div>
+            <div className="bar-row"><div className="bar-label">内容重复</div><div className="bar-track"><span className="architecture" style={{ width: `${files.length ? duplicates / files.length * 100 : 0}%` }} /></div><strong>{duplicates}</strong></div>
+            <div className="bar-row"><div className="bar-label">登记失败</div><div className="bar-track"><span className="issues" style={{ width: `${files.length ? failed / files.length * 100 : 0}%` }} /></div><strong>{failed}</strong></div>
           </div>
         </article>
       </section>
@@ -268,16 +340,35 @@ function MetricCard({ label, value, note, tone, icon, action }: { label: string;
   );
 }
 
-function PipelineStep({ label, value, icon, tone, complete, active }: { label: string; value: number; icon: "upload" | "spark" | "layers" | "check"; tone: "blue" | "violet" | "amber" | "black"; complete?: boolean; active?: boolean }) {
+function SystemStage({ label, status, detail }: { label: string; status: "available" | "planned"; detail: string }) {
   return (
-    <div className={`pipeline-step ${tone} ${complete ? "complete" : ""} ${active ? "active" : ""}`}>
-      <div><Icon name={icon} /></div><strong>{value}</strong><span>{label}</span>
+    <div className={`system-stage ${status}`}>
+      <div><i /><strong>{label}</strong></div>
+      <span>{status === "available" ? "可用" : "未实现"}</span>
+      <small>{detail}</small>
     </div>
   );
 }
 
-function Intake({ files, onFiles, onBrowse, onOpenFile }: { files: RoutingFile[]; onFiles: (files: File[]) => void; onBrowse: () => void; onOpenFile: (id: string) => void }) {
+function Intake({
+  files,
+  projectId,
+  onProjectId,
+  onFiles,
+  onBrowse,
+  onOpenFile,
+  onResetDuplicates
+}: {
+  files: RoutingFile[];
+  projectId: string;
+  onProjectId: (value: string) => void;
+  onFiles: (files: File[]) => void;
+  onBrowse: () => void;
+  onOpenFile: (id: string) => void;
+  onResetDuplicates: () => void;
+}) {
   const [dragging, setDragging] = useState(false);
+  const duplicateCount = files.filter((file) => file.isContentDuplicate).length;
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     setDragging(false);
@@ -295,22 +386,39 @@ function Intake({ files, onFiles, onBrowse, onOpenFile }: { files: RoutingFile[]
         >
           <div className="drop-icon"><Icon name="upload" size={26} /></div>
           <h2>将文件拖到这里</h2>
-          <p>系统会统一完成登记、检查和路由，不会修改你的原始文件。</p>
+          <p>系统会保存不可变原始内容，计算 SHA-256 并建立可追溯的登记记录。</p>
           <button className="secondary-button" onClick={onBrowse}>选择文件</button>
           <span>支持 PDF、Word、Excel、Markdown、CSV 和文本文件</span>
         </div>
         <aside className="intake-info panel">
           <p className="eyebrow">接入原则</p>
-          <h2>一次提交，自动分流</h2>
+          <h2>一次提交，可靠登记</h2>
+          <label className="field-label" htmlFor="project-id">项目 ID</label>
+          <div className="search-box"><input id="project-id" value={projectId} onChange={(event) => onProjectId(event.target.value)} placeholder="输入项目 ID" /></div>
           <ol>
-            <li><b>1</b><div><strong>登记与指纹</strong><span>记录来源、大小、哈希和重复关系</span></div></li>
-            <li><b>2</b><div><strong>轻量检查</strong><span>提取标题、章节和表格结构</span></div></li>
-            <li><b>3</b><div><strong>分类与派发</strong><span>高置信度自动进入对应 Handler</span></div></li>
+            <li><b>1</b><div><strong>流式接收</strong><span>避免将完整文件载入内存</span></div></li>
+            <li><b>2</b><div><strong>内容指纹</strong><span>计算 SHA-256 并复用重复 Blob</span></div></li>
+            <li><b>3</b><div><strong>文件登记</strong><span>记录来源、状态和重复关系</span></div></li>
           </ol>
         </aside>
       </section>
       <section className="panel recent-panel">
-        <div className="panel-heading"><div><p className="eyebrow">摄取记录</p><h2>全部文件</h2></div><span className="subtle-count">{files.length} 个文件</span></div>
+        <div className="panel-heading">
+          <div>
+            <p className="eyebrow">摄取记录</p>
+            <h2>全部文件</h2>
+          </div>
+          <div className="panel-heading-actions">
+            <span className="subtle-count">{files.length} 个文件</span>
+            <button
+              className="secondary-button reset-button"
+              disabled={!duplicateCount}
+              onClick={onResetDuplicates}
+            >
+              {`Reset 去重${duplicateCount ? ` (${duplicateCount})` : ""}`}
+            </button>
+          </div>
+        </div>
         <FileTable files={files} onOpen={onOpenFile} />
       </section>
     </div>
@@ -320,18 +428,18 @@ function Intake({ files, onFiles, onBrowse, onOpenFile }: { files: RoutingFile[]
 function ReviewQueue({ files, onOpenFile }: { files: RoutingFile[]; onOpenFile: (id: string) => void }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<FileCategory | "all">("all");
-  const filtered = useMemo(() => files.filter((file) => {
-    if (file.state !== "review") return false;
+  const reviewFiles = files.filter((file) => file.state === "review");
+  const filtered = useMemo(() => reviewFiles.filter((file) => {
     if (category !== "all" && file.category !== category) return false;
     return `${file.name} ${file.project}`.toLowerCase().includes(query.toLowerCase());
-  }), [files, query, category]);
+  }), [reviewFiles, query, category]);
 
   return (
     <div className="page-stack">
       <section className="review-summary">
-        <div><span>待审核</span><strong>{files.filter((file) => file.state === "review").length}</strong><p>需要人工确认主要类别</p></div>
-        <div><span>平均置信度</span><strong>{Math.round((files.filter((file) => file.state === "review").reduce((sum, file) => sum + file.confidence, 0) / Math.max(1, files.filter((file) => file.state === "review").length)) * 100)}%</strong><p>建议优先查看低置信度文件</p></div>
-        <div><span>最长等待</span><strong>1 天</strong><p>当前没有超期任务</p></div>
+        <div><span>模块状态</span><strong>未接入</strong><p>等待 Inspector 与 Router</p></div>
+        <div><span>待审核</span><strong>{reviewFiles.length}</strong><p>接入 Router 后由真实决策产生</p></div>
+        <div><span>当前阶段</span><strong>Phase 1</strong><p>Intake 与 Registry 已可用</p></div>
       </section>
       <section className="panel queue-panel">
         <div className="queue-toolbar">
@@ -341,13 +449,19 @@ function ReviewQueue({ files, onOpenFile }: { files: RoutingFile[]; onOpenFile: 
             {(Object.keys(categoryMeta) as FileCategory[]).map((item) => <option key={item} value={item}>{categoryMeta[item].label}</option>)}
           </select>
         </div>
-        {filtered.length ? <FileTable files={filtered} onOpen={onOpenFile} reviewMode /> : <EmptyState title="没有匹配的审核任务" text="调整筛选条件，或等待新的文件进入复核队列。" />}
+        {filtered.length ? <FileTable files={filtered} onOpen={onOpenFile} reviewMode /> : <EmptyState title="Router 尚未接入" text="页面结构已经保留。Inspector 和 Router 完成后，需要人工确认的真实决策会进入这里。" />}
       </section>
     </div>
   );
 }
 
 function Handlers() {
+  const statusLabel = {
+    planned: "规划中",
+    specified: "规则已定义",
+    "in-development": "开发中",
+    available: "可用"
+  } as const;
   return (
     <div className="page-stack">
       <section className="handler-intro panel">
@@ -359,14 +473,13 @@ function Handlers() {
           <article className="handler-card" key={handler.id}>
             <div className="handler-top">
               <div className={`handler-symbol ${handler.category}`}>{categoryMeta[handler.category].short.slice(0, 1)}</div>
-              <span className={`health ${handler.status}`}><i />{handler.status === "healthy" ? "运行正常" : handler.status === "draft" ? "试运行" : "需要关注"}</span>
+              <span className={`health ${handler.implementationStatus}`}><i />{statusLabel[handler.implementationStatus]}</span>
             </div>
             <div className="handler-title"><h3>{handler.label} Handler</h3><code>{handler.version}</code></div>
             <p>{handler.description}</p>
-            <div className="handler-stats">
-              <div><span>已处理</span><strong>{handler.processed}</strong></div>
-              <div><span>待处理</span><strong>{handler.pending}</strong></div>
-              <div><span>成功率</span><strong>{handler.successRate}%</strong></div>
+            <div className="handler-plan">
+              <div><span>依赖模块</span><strong>{handler.dependency}</strong></div>
+              <div><span>下一步</span><strong>{handler.nextStep}</strong></div>
             </div>
             <div className="handler-footer"><code>{handler.id}</code><button aria-label={`查看 ${handler.label} Handler`}><Icon name="chevron" size={17} /></button></div>
           </article>
@@ -380,14 +493,19 @@ function FileTable({ files, onOpen, reviewMode = false }: { files: RoutingFile[]
   return (
     <div className="table-scroll">
       <table className="file-table">
-        <thead><tr><th>文件</th><th>项目</th><th>建议类别</th><th>{reviewMode ? "置信度" : "状态"}</th><th>提交时间</th><th /></tr></thead>
+        <thead><tr><th>文件</th><th>项目</th><th>{reviewMode ? "建议类别" : "SHA-256"}</th><th>{reviewMode ? "置信度" : "状态"}</th><th>提交时间</th><th /></tr></thead>
         <tbody>
           {files.map((file) => (
             <tr key={file.id} onClick={() => onOpen(file.id)} tabIndex={0} onKeyDown={(event) => event.key === "Enter" && onOpen(file.id)}>
               <td><div className="file-cell"><span className={`file-type ${file.extension.toLowerCase()}`}>{file.extension.slice(0, 4)}</span><div><strong>{file.name}</strong><span>{file.size} · {file.source}</span></div></div></td>
               <td><span className="project-name">{file.project}</span></td>
-              <td><CategoryBadge category={file.category} /></td>
-              <td>{reviewMode ? <Confidence value={file.confidence} /> : <StateBadge state={file.state} />}</td>
+              <td>{reviewMode ? <CategoryBadge category={file.category} /> : <code title={file.sha256}>{file.sha256 === "计算中…" ? file.sha256 : `${file.sha256.slice(0, 12)}${file.sha256.length > 12 ? "…" : ""}`}</code>}</td>
+              <td>{reviewMode
+                ? <Confidence value={file.confidence} />
+                : <div className="file-status-stack">
+                    <StateBadge state={file.state} />
+                    {file.isContentDuplicate && <span className="duplicate-badge">内容重复</span>}
+                  </div>}</td>
               <td><span className="time-cell">{file.submittedAt}</span></td>
               <td><Icon className="row-chevron" name="chevron" size={16} /></td>
             </tr>
@@ -407,41 +525,32 @@ function EmptyState({ title, text }: { title: string; text: string }) {
   return <div className="empty-state"><div><Icon name="search" /></div><h3>{title}</h3><p>{text}</p></div>;
 }
 
-function FileDrawer({ file, onClose, onUpdate }: { file: RoutingFile; onClose: () => void; onUpdate: (update: Partial<RoutingFile>) => void }) {
-  const [category, setCategory] = useState<FileCategory>(file.category ?? "project-materials");
-  const approve = () => {
-    onUpdate({ category, confidence: Math.max(file.confidence, 0.99), disposition: "auto-route", state: "processing", reasons: [...file.reasons, { source: "reviewer", code: "manual-approval", evidence: `审核人确认主要类别为“${categoryMeta[category].label}”。` }] });
-    onClose();
-  };
-
+function FileDrawer({ file, onClose }: { file: RoutingFile; onClose: () => void }) {
   return (
     <div className="drawer-layer">
       <button className="drawer-backdrop" onClick={onClose} aria-label="关闭详情" />
       <aside className="drawer">
-        <div className="drawer-header"><div><p className="eyebrow">文件详情</p><h2>路由判断</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button></div>
+        <div className="drawer-header"><div><p className="eyebrow">文件详情</p><h2>登记记录</h2></div><button className="icon-button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button></div>
         <div className="drawer-file"><span className={`file-type large ${file.extension.toLowerCase()}`}>{file.extension.slice(0, 4)}</span><div><h3>{file.name}</h3><p>{file.project} · {file.size}</p></div></div>
 
         <section className="drawer-section">
-          <div className="section-title"><h3>建议路由</h3><Confidence value={file.confidence} /></div>
-          <label className="field-label">主要类别</label>
-          <select className="wide-select" value={category} onChange={(event) => setCategory(event.target.value as FileCategory)}>
-            {(Object.keys(categoryMeta) as FileCategory[]).map((item) => <option key={item} value={item}>{categoryMeta[item].label}</option>)}
-          </select>
-          {!!file.secondarySignals.length && <><label className="field-label">次级信号</label><div className="signal-list">{file.secondarySignals.map((signal) => <span key={signal}>{signal}</span>)}</div></>}
-        </section>
-
-        <section className="drawer-section">
-          <h3>判断依据</h3>
-          <div className="reason-list">
-            {file.reasons.map((reason, index) => <div key={`${reason.code}-${index}`}><span>{index + 1}</span><div><strong>{reason.code}</strong><p>{reason.evidence}</p><small>{reason.source}</small></div></div>)}
-          </div>
+          <div className="section-title"><h3>Registry 状态</h3><StateBadge state={file.state} /></div>
+          {file.isContentDuplicate && <><label className="field-label">重复内容</label><p>系统检测到相同内容的再次提交；数据库仅保留这一条文件登记记录。</p></>}
+          {file.failureMessage && <><label className="field-label">失败原因</label><p>{file.failureMessage}</p></>}
         </section>
 
         <section className="drawer-section meta-grid">
-          <div><span>文件 ID</span><code>{file.id}</code></div><div><span>来源</span><strong>{file.source}</strong></div><div><span>SHA-256</span><code>{file.sha256}</code></div><div><span>策略版本</span><code>routing-policy.v1</code></div>
+          <div><span>文件 ID</span><code>{file.id}</code></div><div><span>批次 ID</span><code>{file.batchId ?? "—"}</code></div><div><span>来源</span><strong>{file.source}</strong></div><div><span>SHA-256</span><code>{file.sha256}</code></div>
         </section>
 
-        <div className="drawer-actions"><button className="secondary-button" onClick={onClose}>暂不处理</button><button className="primary-button" onClick={approve}><Icon name="check" size={17} />确认并派发</button></div>
+        <section className="drawer-section lifecycle-sections">
+          <div className="lifecycle-row available"><span>1</span><div><strong>Intake 与 Registry</strong><p>已完成原始文件存储、内容指纹和登记。</p></div><b>已完成</b></div>
+          <div className="lifecycle-row planned"><span>2</span><div><strong>Inspector</strong><p>等待实现元数据、文本和结构采样。</p></div><b>未执行</b></div>
+          <div className="lifecycle-row planned"><span>3</span><div><strong>Router 与 Review</strong><p>等待生成类别候选、证据和审核决策。</p></div><b>未执行</b></div>
+          <div className="lifecycle-row planned"><span>4</span><div><strong>Dispatcher 与 Handler</strong><p>等待路由批准后派发给对应类别处理器。</p></div><b>未执行</b></div>
+        </section>
+
+        <div className="drawer-actions"><button className="secondary-button" onClick={onClose}>关闭</button></div>
       </aside>
     </div>
   );

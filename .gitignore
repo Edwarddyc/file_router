@@ -27,6 +27,19 @@ dist/
 .npm/
 coverage/
 .nyc_output/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Python
+__pycache__/
+*.py[cod]
+backend/.venv/
+backend/.uv-cache/
+backend/.test-tmp/
+
+# File Router 运行数据
+runtime/
 
 # ===== pi-mono 特有（已加 pi-mono/ 前缀）=====
 pi-mono/.artifacts/

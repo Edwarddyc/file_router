@@ -6,6 +6,8 @@ export function CategoryBadge({ category }: { category?: FileCategory }) {
 }
 
 const stateLabels: Record<JobState, string> = {
+  uploading: "上传中",
+  registered: "已登记",
   routing: "路由中",
   review: "待审核",
   processing: "处理中",

@@ -462,126 +462,40 @@ received
 
 ## 11. 代码目录规划
 
-建议以 `judge_tool` 为应用根目录，形成以下结构：
+后端采用 Python + FastAPI，前端继续使用 React + TypeScript。第一阶段的详细设计与实际目录以 [`第一阶段后端-spec.md`](第一阶段后端-spec.md) 为准。完整系统逐步扩展为以下结构：
 
 ```text
 judge_tool/
 ├── README.md
-├── package.json
-├── tsconfig.json
 ├── 知识管理存储清单.md
 ├── specs/
-│   └── 初始路由系统-spec.md
+│   ├── 初始路由系统-spec.md
+│   └── 第一阶段后端-spec.md
 ├── project_materials/
 │   └── 项目资料甄别规则.md
-├── config/
-│   ├── categories.yaml
-│   ├── routing-policy.yaml
-│   ├── handlers.yaml
-│   └── logging.yaml
-├── schemas/
-│   ├── ingest-request.schema.json
-│   ├── file-record.schema.json
-│   ├── inspection-result.schema.json
-│   ├── routing-decision.schema.json
-│   └── handler-result.schema.json
-├── prompts/
-│   └── router/
-│       ├── system.md
-│       └── classify-file.md
-├── src/
-│   ├── cli.ts
-│   ├── api.ts
+├── frontend/                         # React + TypeScript
+├── backend/                          # Python + FastAPI
+│   ├── pyproject.toml
+│   ├── alembic/
 │   ├── app/
-│   │   ├── create-app.ts
-│   │   └── dependencies.ts
-│   ├── intake/
-│   │   ├── ingest.ts
-│   │   ├── expand-inputs.ts
-│   │   └── input-reference.ts
-│   ├── registry/
-│   │   ├── file-registry.ts
-│   │   ├── hash-file.ts
-│   │   └── duplicate-detector.ts
-│   ├── inspector/
-│   │   ├── inspect-file.ts
-│   │   ├── metadata-inspector.ts
-│   │   ├── content-sampler.ts
-│   │   └── adapters/
-│   │       ├── text.ts
-│   │       ├── markdown.ts
-│   │       ├── pdf.ts
-│   │       ├── word.ts
-│   │       └── spreadsheet.ts
-│   ├── router/
-│   │   ├── route-file.ts
-│   │   ├── explicit-hint-classifier.ts
-│   │   ├── rule-classifier.ts
-│   │   ├── semantic-classifier.ts
-│   │   ├── decision-policy.ts
-│   │   ├── route-validator.ts
-│   │   └── types.ts
-│   ├── orchestrator/
-│   │   ├── intake-orchestrator.ts
-│   │   ├── state-machine.ts
-│   │   ├── dispatcher.ts
-│   │   ├── retry-policy.ts
-│   │   └── job-store.ts
-│   ├── handlers/
-│   │   ├── handler.ts
-│   │   ├── handler-registry.ts
-│   │   ├── project-materials/
-│   │   │   ├── index.ts
-│   │   │   ├── background-extractor.ts
-│   │   │   ├── dataset-matcher.ts
-│   │   │   ├── dataset-profiler.ts
-│   │   │   └── result-validator.ts
-│   │   ├── business-knowledge/
-│   │   │   └── index.ts
-│   │   ├── architecture/
-│   │   │   └── index.ts
-│   │   ├── results/
-│   │   │   └── index.ts
-│   │   └── issues/
-│   │       └── index.ts
-│   ├── review/
-│   │   ├── routing-review.ts
-│   │   ├── category-review.ts
-│   │   └── review-store.ts
-│   ├── storage/
-│   │   ├── artifact-store.ts
-│   │   ├── local-store.ts
-│   │   └── paths.ts
-│   ├── observability/
-│   │   ├── logger.ts
-│   │   ├── audit-log.ts
-│   │   └── metrics.ts
-│   └── shared/
-│       ├── errors.ts
-│       ├── ids.ts
-│       ├── clock.ts
-│       └── schema-validator.ts
-├── tests/
-│   ├── unit/
-│   │   ├── router/
-│   │   ├── registry/
-│   │   └── handlers/
-│   ├── contract/
-│   │   └── handlers/
-│   ├── integration/
-│   │   └── ingest-flow.test.ts
-│   ├── evaluation/
-│   │   ├── routing-cases.jsonl
-│   │   └── routing-evaluation.test.ts
-│   └── fixtures/
-│       ├── project-materials/
-│       ├── business-knowledge/
-│       ├── architecture/
-│       ├── results/
-│       ├── issues/
-│       └── ambiguous/
+│   │   ├── api/                      # HTTP、OpenAPI 与错误映射
+│   │   ├── application/              # Intake、路由和派发编排
+│   │   ├── domain/                   # 模型、状态和端口
+│   │   ├── infrastructure/           # SQLite、文件存储和外部适配器
+│   │   ├── schemas/                  # Pydantic DTO
+│   │   ├── handlers/                 # 五类 Handler
+│   │   └── core/                     # 配置、日志和通用基础设施
+│   └── tests/
+│       ├── unit/
+│       ├── contract/
+│       ├── integration/
+│       ├── evaluation/
+│       └── fixtures/
+├── config/                            # 分类、路由政策和 Handler 配置
+├── prompts/                           # 独立版本化的 Agent 提示词
 └── runtime/                    # 运行数据，不纳入源码版本控制
-    ├── inbox/
+    ├── staging/
+    ├── originals/
     ├── registry/
     ├── routing/
     │   ├── decisions/
@@ -595,20 +509,20 @@ judge_tool/
 
 ### 11.1 目录职责说明
 
+- `backend/app/api/`：FastAPI 路由、OpenAPI 和统一错误响应；
+- `backend/app/application/`：用例编排、状态转换、重试和派发；
+- `backend/app/domain/`：不依赖框架的领域模型和端口；
+- `backend/app/infrastructure/`：SQLite、本地文件存储和外部系统适配器；
+- `backend/app/handlers/`：类别专属实现；
+- `backend/tests/evaluation/`：根据人工改判持续积累分类基准集；
 - `config/`：环境无关的分类枚举、阈值、Handler 启停和日志策略；
-- `schemas/`：模块间契约的唯一机器可校验定义；
 - `prompts/`：LLM 路由提示词，必须独立版本化；
-- `src/router/`：只包含分类和决策逻辑；
-- `src/orchestrator/`：负责编排、状态转换、重试和派发；
-- `src/handlers/`：类别专属实现；
-- `src/review/`：路由审核和类别审核，不混合两种审核语义；
-- `tests/evaluation/`：根据人工改判持续积累分类基准集；
 - `runtime/`：运行期产物，应加入 `.gitignore`；
 - 现有政策文档暂时保留原位置，代码通过配置引用，不在第一阶段搬迁。
 
 ### 11.2 技术边界
 
-目录示例以 TypeScript 为主，原因是当前 `judge_tool` 已包含 TypeScript 生态的 Pi Agent 代码，Router 和 Orchestrator 可以共享类型及运行工具。PDF、Word、Excel 等确定性解析可以通过适配器调用独立程序，不能让格式工具侵入 Router。
+后端统一采用 Python + FastAPI，前端通过 OpenAPI 生成 TypeScript Client。`pi-mono` 通过独立 Adapter、子进程或 HTTP 边界接入，不能让 Agent Runtime 侵入 Intake、Registry 或 Router 的领域模型。本文中的 TypeScript `interface` 仅用于表达语言无关的数据契约，实际后端以 Pydantic Model 和 OpenAPI Schema 实现。
 
 ## 12. 配置规划
 

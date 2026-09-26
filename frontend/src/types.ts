@@ -6,7 +6,7 @@ export type FileCategory =
   | "issues";
 
 export type RouteDisposition = "auto-route" | "needs-review" | "quarantine" | "reject";
-export type JobState = "routing" | "review" | "processing" | "accepted" | "failed";
+export type JobState = "uploading" | "registered" | "routing" | "review" | "processing" | "accepted" | "failed";
 
 export interface RouteReason {
   source: "hint" | "rule" | "semantic" | "policy" | "reviewer";
@@ -24,11 +24,15 @@ export interface RoutingFile {
   category?: FileCategory;
   secondarySignals: string[];
   confidence: number;
-  disposition: RouteDisposition;
+  disposition?: RouteDisposition;
   state: JobState;
   reasons: RouteReason[];
   sha256: string;
   source: string;
+  batchId?: string;
+  duplicateOfFileId?: string;
+  isContentDuplicate?: boolean;
+  failureMessage?: string;
 }
 
 export interface HandlerStatus {
@@ -36,11 +40,10 @@ export interface HandlerStatus {
   category: FileCategory;
   label: string;
   version: string;
-  status: "healthy" | "draft" | "attention";
-  processed: number;
-  pending: number;
-  successRate: number;
+  implementationStatus: "planned" | "specified" | "in-development" | "available";
   description: string;
+  dependency: string;
+  nextStep: string;
 }
 
 export type ViewId = "overview" | "intake" | "review" | "handlers";
